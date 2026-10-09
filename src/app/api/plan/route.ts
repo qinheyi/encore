@@ -4,7 +4,7 @@ import { buildTourPlan } from "@/lib/encore/plan";
 import { isMockMode } from "@/lib/qloo";
 
 export const dynamic = "force-dynamic";
-export const maxDuration = 120; // Qloo playbooks + optional LLM
+export const maxDuration = 60; // Qloo playbooks + one LLM call; the agent stops at ~54s and falls back to templates
 
 export async function POST(req: Request) {
   let body: unknown;

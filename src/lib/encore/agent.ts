@@ -28,6 +28,8 @@ export interface AgentContext {
   playbooks: Map<string, Playbook>;
   loadPlaybook: (city: CityCandidate) => Promise<Playbook>;
   home?: { lat: number; lon: number; city: string };
+  /** Epoch ms by which the agent must finish (keeps the serverless function under its maxDuration). */
+  deadline?: number;
 }
 
 const AgentOutput = z.object({
@@ -145,7 +147,9 @@ export async function runAgent(ctx: AgentContext): Promise<AgentResult> {
   try {
     for (let step = 1; step <= cfg.maxSteps; step++) {
       const offerTools = step < cfg.maxSteps;
-      const res = await chatCompletion({ messages, tools: offerTools ? TOOLS : undefined, jsonMode: !offerTools });
+      const remaining = ctx.deadline ? ctx.deadline - Date.now() : undefined;
+      if (remaining !== undefined && remaining < 5_000) throw new Error("time budget exhausted before LLM call");
+      const res = await chatCompletion({ messages, tools: offerTools ? TOOLS : undefined, jsonMode: !offerTools, timeoutMs: remaining });
       info.steps = step;
       if (res.usage) {
         info.usage = {

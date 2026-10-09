@@ -137,7 +137,8 @@ export async function chatCompletion(opts: {
   if (opts.jsonMode && spec.jsonMode) body.response_format = { type: "json_object" };
 
   const ctrl = new AbortController();
-  const timer = setTimeout(() => ctrl.abort(), opts.timeoutMs ?? (Number(process.env.LLM_TIMEOUT_MS || process.env.STEPFUN_TIMEOUT_MS) || 110_000));
+  const envTimeout = Number(process.env.LLM_TIMEOUT_MS || process.env.STEPFUN_TIMEOUT_MS) || 110_000;
+  const timer = setTimeout(() => ctrl.abort(), Math.min(envTimeout, opts.timeoutMs ?? envTimeout));
   try {
     const res = await fetch(`${cfg.baseUrl}/chat/completions`, {
       method: "POST",

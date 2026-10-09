@@ -1,66 +1,86 @@
-# Encore — taste-grounded tour routing for independent artists
+# Encore — an AI tour-planning agent for independent musicians
 
-Built for the [Qloo Agentic Hackathon](https://qloo.devpost.com/).
+**Live demo:** _DEMO_URL_PLACEHOLDER_ · Built for the [Qloo Agentic Hackathon](https://qloo.devpost.com/) · MIT licensed
 
-Enter an artist → Encore asks Qloo's taste graph **where the artist's audience over-indexes**, routes a road tour
-through the best markets, and builds a playbook for every stop — **venues** whose crowd matches, **local co-bill acts**,
-and the **podcasts and brands** those fans love for promotion. An LLM agent picks the final set of markets (respecting
-the artist's notes) and writes a grounded reason for every stop and every recommendation.
+Type an artist's name. Encore asks the **Qloo Taste AI** graph *where that artist's audience over-indexes*, picks the
+best markets, routes a road tour through them, and builds a playbook for every stop:
 
-> Status: **live Qloo** end-to-end (venues filtered by live-music tag; MiniMax agent optional via `ENCORE_LLM=minimax`).
+- **Live-music venues** whose crowd matches the artist's fans
+- **Co-bill / opener fits**: taste-aligned artists who share the audience
+- **Podcasts and brands** those fans love, for promotion and merch partners
+
+An LLM agent picks the final set of markets (following notes like *"van tour, keep it East Coast"*) and writes a
+grounded reason for every stop and recommendation, citing Qloo affinity scores and taste drivers. A map
+(OpenStreetMap / Leaflet), a day-by-day schedule and a Markdown export are included.
 
 ## How it works
 ```
-artist ─▶ Qloo /search ─▶ artist entity
-        ├▶ /v2/insights filter.type=artist        → "fans also love" (taste drivers)
-        ├▶ /v2/insights filter.type=destination   → ranked markets (affinity)
-        └▶ per market: place / artist / podcast / brand insights (location-scoped)
+artist ─▶ Qloo /search                                  → artist entity
+        ├▶ /v2/insights filter.type=artist               → "fans also love" (taste drivers)
+        ├▶ /v2/insights filter.type=destination          → ranked markets
+        │     signal = artist + top similar artists, feature.explainability → named drivers per city
+        │     filter.popularity.min, blended with popularity so tiny towns don't dominate
+        └▶ per market (location-scoped insights):
+              place   + filter.tags=urn:tag:genre:place:live_music_venue → venues
+              artist / podcast / brand                                     → openers, promo, partners
                     │
                     ▼
-     Agent (MiniMax-M3 or StepFun step-3.5-flash, OpenAI-compatible)
-       - chooses N markets from the ranking (honours notes like "avoid big cities")
-       - optional tools: get_city_playbook, estimate_route_km
-       - writes a reason per city + per item, citing affinity/rank/drivers
-                    │  (validated: unknown ids dropped, gaps filled by rule-based reasons)
+     Agent (MiniMax-M3 by default; StepFun also supported; OpenAI-compatible APIs)
+       - chooses N markets from the ranking, honouring the artist's notes
+       - writes a reason per city and per item, citing affinity / rank / drivers
+       - output is validated: unknown or never-shown ids are dropped, gaps filled by rule-based reasons
+                    │
                     ▼
-     Code: nearest-neighbour + 2-opt routing from the home city, one show/day,
-           travel day before legs > 700 km → map (OpenStreetMap/Leaflet) + Markdown export
+     Code: nearest-neighbour + 2-opt routing from the home city, one show per day,
+           travel day before legs > 700 km → map + schedule + Markdown export
 ```
-If the LLM is disabled, out of quota, slow or returns bad JSON, Encore falls back to deterministic,
-signal-citing reasons — the plan is always complete.
+**Always returns a complete plan.** If the LLM is disabled, out of quota, slow (the agent stops at a ~54 s budget so the
+60 s function never times out) or returns bad JSON, Encore falls back to deterministic, signal-citing reasons.
 
 ## Run locally
 ```bash
 npm install
-npm run dev            # http://localhost:3000 — mock data, rule-based reasons, no API calls
+cp .env.example .env.local     # fill in keys; never commit them
+npm run dev                    # http://localhost:3000
 ```
-Enable the agent (costs credits, ~1 call per plan). Keys come from the environment — never commit them:
-```bash
-export MINIMAX_API_KEY=...
-ENCORE_LLM=minimax npm run dev          # MiniMax-M3 via https://api.minimax.cn/v1
-# or
-export STEPFUN_API_KEY=...
-ENCORE_LLM=stepfun npm run dev          # step-3.5-flash via https://api.stepfun.com/v1
+With no `QLOO_API_KEY`, the app runs on clearly-labelled **synthetic mock data** (badge: "Data: MOCK placeholder").
+
+### Environment variables
+| Variable | Required | Default | Purpose |
+|---|---|---|---|
+| `QLOO_API_KEY` | for live data | — | Qloo hackathon API key (`X-Api-Key`) |
+| `QLOO_MOCK` | no | empty | `1` forces mock data even with a key |
+| `ENCORE_LLM` | no | empty (off) | `minimax` or `stepfun` enables the agent |
+| `MINIMAX_API_KEY` | if `ENCORE_LLM=minimax` | — | MiniMax API key |
+| `MINIMAX_BASE_URL` | no | `https://api.minimax.cn/v1` | MiniMax OpenAI-compatible endpoint |
+| `MINIMAX_MODEL` | no | `MiniMax-M3` | Model name (M3 runs with thinking disabled for speed) |
+| `MINIMAX_THINKING` | no | empty | `adaptive` re-enables M3 thinking |
+| `STEPFUN_API_KEY` / `STEPFUN_BASE_URL` / `STEPFUN_MODEL` | if `ENCORE_LLM=stepfun` | `https://api.stepfun.com/v1`, `step-3.5-flash` | StepFun alternative |
+| `ENCORE_AGENT_MAX_STEPS` | no | `1` | `1` = one structured call; `2–4` = allow tool calls (`get_city_playbook`, `estimate_route_km`) |
+| `ENCORE_PLAN_BUDGET_MS` | no | `54000` | Per-plan time budget; past it the agent falls back to templates |
+| `LLM_TIMEOUT_MS` | no | `110000` | Upper bound for one LLM request |
+
+### API
+`POST /api/plan`
+```json
+{"artist":"Phoebe Bridgers","homeCity":"Chicago","countryCode":"US","shows":6,"startDate":"2026-11-06","notes":"Van tour; prefer mid-size rooms."}
 ```
-Options (see `.env.example`): `ENCORE_AGENT_MAX_STEPS=3` lets the agent call tools before answering;
-`MINIMAX_MODEL` / `MINIMAX_BASE_URL` / `MINIMAX_THINKING=adaptive`; `STEPFUN_MODEL` / `STEPFUN_BASE_URL`; `LLM_TIMEOUT_MS`.
+Returns ranked markets, the ordered route with dates and leg distances, per-stop venues / openers / podcasts / brands
+with reasons, and metadata on the data source and agent (model, latency, reason coverage, fallback reason).
 
-Provider notes:
-- **MiniMax**: no `response_format` JSON mode, so JSON is enforced by the prompt and a tolerant parser
-  (strips `<think>…</think>`, code fences and prose, picks the first valid object). Requests set
-  `reasoning_split: true`; in tool loops the assistant message is echoed back unmodified (incl. `reasoning_details`),
-  as MiniMax requires. Errors reported via `base_resp.status_code` (e.g. 1008 insufficient balance) trigger the fallback.
-- **StepFun**: uses `response_format: {"type":"json_object"}`.
+## Qloo APIs used
+- Base URL `https://hackathon.api.qloo.com`, header `X-Api-Key`
+- `GET /search?types=urn:entity:artist` to resolve the artist entity
+- `GET /v2/insights` with:
+  - `filter.type=urn:entity:artist` + `signal.interests.entities` for similar artists (taste drivers)
+  - `filter.type=urn:entity:destination` + `filter.geocode.country_code`, `filter.popularity.min`, `feature.explainability` for market ranking with per-driver contributions
+  - `filter.type=urn:entity:place` + `filter.location.query` + `filter.tags=urn:tag:genre:place:live_music_venue` for venues
+  - `filter.type=urn:entity:artist | podcast | brand` + `signal.location.query` for openers, podcasts and brands
+- `GET /v2/tags` was used during development to find the live-music venue tag
+- Qloo responses are cached privately server-side only (Next.js fetch cache) and are **not** stored in this repository.
 
-API: `POST /api/plan` with `{"artist":"…","homeCity":"Chicago","countryCode":"US","shows":8,"startDate":"2026-11-06","notes":"…"}`.
-
-## Qloo usage
-- Base URL: `https://hackathon.api.qloo.com`, header `X-Api-Key`
-- `/search` → resolve the artist entity
-- `/v2/insights` with `filter.type` = artist / destination / place / podcast / brand, `signal.interests.entities`,
-  `signal.location.query`, `filter.location.query`, `filter.geocode.country_code`
-- Qloo responses are cached privately server-side only and are **not** stored in this repo.
-- Without a key the app uses clearly-labelled **synthetic** placeholder data (`src/lib/encore/sources.ts`), not Qloo data.
+## Tech
+Next.js 15 (App Router) · TypeScript · Tailwind · zod · Leaflet / react-leaflet with OpenStreetMap tiles · deployed on Vercel.
 
 ## License
-MIT
+[MIT](./LICENSE)

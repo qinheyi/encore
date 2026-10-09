@@ -8,7 +8,11 @@ const RANKING_SIZE = 15;
 /** Cap parallel Qloo playbook fetches to avoid 429s. */
 const PLAYBOOK_CONCURRENCY = 2;
 
+/** Total wall-clock budget per plan; keep below the route's maxDuration (60s) with headroom. */
+const PLAN_BUDGET_MS = Number(process.env.ENCORE_PLAN_BUDGET_MS) || 54_000;
+
 export async function buildTourPlan(req: PlanRequest): Promise<TourPlan> {
+  const startedAt = Date.now();
   const ds = getDataSource();
   const artist = await ds.resolveArtist(req.artist);
   const similar = await ds.similarArtists(artist.id);
@@ -61,7 +65,7 @@ export async function buildTourPlan(req: PlanRequest): Promise<TourPlan> {
     playbooks.set(c.id, await loadPlaybook(c));
   });
 
-  const { output, info } = await runAgent({ artist, request: req, similar, ranking: routable, defaultRouteIds, playbooks, loadPlaybook, home });
+  const { output, info } = await runAgent({ artist, request: req, similar, ranking: routable, defaultRouteIds, playbooks, loadPlaybook, home, deadline: startedAt + PLAN_BUDGET_MS });
 
   let chosen = defaultRouteIds;
   if (output?.route_city_ids?.length) {
