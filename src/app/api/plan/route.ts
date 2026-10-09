@@ -1,9 +1,10 @@
 import { NextResponse } from "next/server";
 import { PlanRequest } from "@/lib/encore/types";
 import { buildTourPlan } from "@/lib/encore/plan";
+import { isMockMode } from "@/lib/qloo";
 
 export const dynamic = "force-dynamic";
-export const maxDuration = 120; // reasoning model + one tool round-trip
+export const maxDuration = 120; // Qloo playbooks + optional LLM
 
 export async function POST(req: Request) {
   let body: unknown;
@@ -20,6 +21,9 @@ export async function POST(req: Request) {
     const plan = await buildTourPlan(parsed.data);
     return NextResponse.json(plan);
   } catch (e) {
-    return NextResponse.json({ error: (e as Error).message }, { status: 502 });
+    const msg = (e as Error).message || "Plan failed";
+    console.error("plan error:", msg, "mock=", isMockMode());
+    const status = /not found/i.test(msg) ? 404 : /Invalid|must be/i.test(msg) ? 400 : 502;
+    return NextResponse.json({ error: msg }, { status });
   }
 }

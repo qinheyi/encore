@@ -4,20 +4,20 @@ import type { CityCandidate, Rec } from "./types";
 export function cityWhy(c: CityCandidate, artist: string, total: number): string {
   const drivers = c.drivers.slice(0, 2).map((d) => d.name).join(" and ");
   return `Ranked #${c.rank} of ${total} markets for ${artist}'s audience (affinity ${c.affinity.toFixed(2)}).` +
-    (drivers ? ` The local taste overlap is driven by fans who also love ${drivers}.` : "");
+    (drivers ? ` Taste overlap is driven by fans who also love ${drivers}.` : "");
 }
 
 export function recWhy(r: Rec, artist: string, city: string): string {
   const a = r.affinity.toFixed(2);
   switch (r.kind) {
     case "venue":
-      return `#${r.rankInCity} venue match in ${city}: its crowd over-indexes on ${artist}'s fans (affinity ${a})${r.tags.length ? `; tagged ${r.tags.join(", ")}` : ""}.`;
+      return `#${r.rankInCity} live-music venue in ${city}: its crowd over-indexes on ${artist}'s fans (affinity ${a})${r.tags.length ? `; tagged ${r.tags.slice(0, 2).join(", ")}` : ""}.`;
     case "coBill":
-      return `Local act with ${a} affinity among ${artist}'s fans in ${city} — a natural opener who brings an overlapping crowd.`;
+      return `Taste-aligned opener (affinity ${a} with ${artist}'s ${city} audience) — overlapping fans make this a natural co-bill.`;
     case "podcast":
-      return `${artist}'s fans in ${city} over-index on this show (affinity ${a}) — pitch an interview or a host-read ad before the date.`;
+      return `${artist}'s fans in ${city} over-index on this show (affinity ${a}) — pitch an interview or a host-read before the date.`;
     case "brand":
-      return `Brand affinity ${a} with ${artist}'s ${city} audience — candidate for a merch collab or a sponsored after-show.`;
+      return `Brand affinity ${a} with ${artist}'s ${city} audience — candidate for a merch collab or sponsored after-show.`;
   }
 }
 

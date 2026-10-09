@@ -13,7 +13,7 @@ const RouteMap = dynamic(() => import("@/components/RouteMap"), {
 
 const KIND_LABEL: Record<Rec["kind"], string> = {
   venue: "Venues",
-  coBill: "Local co-bills",
+  coBill: "Co-bill / opener fits",
   podcast: "Podcasts",
   brand: "Brands",
 };
@@ -51,6 +51,7 @@ function RecList({ title, recs }: { title: string; recs: Rec[] }) {
                 <span key={t} className="rounded bg-stone-100 px-1.5 text-[11px] text-stone-600">{t}</span>
               ))}
             </div>
+            {r.address && <p className="text-xs text-stone-400">{r.address}</p>}
             <p className="text-stone-600">
               <span className="mr-1 text-[10px] font-semibold uppercase text-stone-400">{r.whySource === "agent" ? "Agent" : "Rule"}</span>
               {r.why}
@@ -83,12 +84,16 @@ function StopCard({ s }: { s: Stop }) {
         {s.why}
       </p>
       {s.promoIdea && <p className="mb-4 rounded-lg bg-amber-50 px-3 py-2 text-sm text-amber-900"><strong>Promo idea:</strong> {s.promoIdea}</p>}
-      <div className="grid gap-4 md:grid-cols-2">
-        <RecList title={KIND_LABEL.venue} recs={s.venues} />
-        <RecList title={KIND_LABEL.coBill} recs={s.coBills} />
-        <RecList title={KIND_LABEL.podcast} recs={s.podcasts} />
-        <RecList title={KIND_LABEL.brand} recs={s.brands} />
-      </div>
+      {(s.venues.length + s.coBills.length + s.podcasts.length + s.brands.length) === 0 ? (
+        <p className="rounded-lg bg-stone-50 px-3 py-2 text-sm text-stone-500">No venue / opener / promo picks returned for this stop (Qloo may have timed out or filtered everything). The market still ranks for audience affinity.</p>
+      ) : (
+        <div className="grid gap-4 md:grid-cols-2">
+          <RecList title={KIND_LABEL.venue} recs={s.venues} />
+          <RecList title={KIND_LABEL.coBill} recs={s.coBills} />
+          <RecList title={KIND_LABEL.podcast} recs={s.podcasts} />
+          <RecList title={KIND_LABEL.brand} recs={s.brands} />
+        </div>
+      )}
     </article>
   );
 }
@@ -149,7 +154,7 @@ export default function Home() {
         <h1 className="text-4xl font-bold tracking-tight">Encore</h1>
         <p className="mt-2 max-w-2xl text-stone-600">
           Taste-driven tour routing for independent artists. Encore reads the Qloo taste graph to find where your audience
-          over-indexes, routes the tour, and lines up venues, local openers, podcasts and brand partners — explaining every pick.
+          over-indexes, routes the tour, and lines up live-music venues, taste-aligned openers, podcasts and brand partners — explaining every pick.
         </p>
       </header>
 
@@ -161,6 +166,7 @@ export default function Home() {
         <label className="md:col-span-2">
           <span className="mb-1 block text-xs font-medium text-stone-600">Home city (route start)</span>
           <input className={input} value={homeCity} onChange={(e) => setHomeCity(e.target.value)} placeholder="e.g. Chicago" />
+          <span className="mt-1 block text-[11px] text-stone-400">Must match a known touring city for map start (Chicago, Berlin, Tokyo…).</span>
         </label>
         <label>
           <span className="mb-1 block text-xs font-medium text-stone-600">Country</span>
@@ -188,7 +194,23 @@ export default function Home() {
         </div>
       </form>
 
-      {error && <p className="mb-6 rounded-lg bg-red-50 px-4 py-3 text-sm text-red-800">Error: {error}</p>}
+      {error && (
+        <div className="mb-6 rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-900">
+          <strong className="font-semibold">Could not plan this tour.</strong> {error}
+        </div>
+      )}
+
+      {loading && !plan && (
+        <div className="mb-8 space-y-4 rounded-xl border border-stone-200 bg-white p-5 shadow-sm">
+          <p className="text-sm font-medium text-stone-700">Pulling taste signals from Qloo and drafting the route…</p>
+          <div className="h-3 w-2/3 animate-pulse rounded bg-stone-200" />
+          <div className="h-[200px] animate-pulse rounded-xl bg-stone-100" />
+          <div className="grid gap-3 md:grid-cols-2">
+            <div className="h-24 animate-pulse rounded-lg bg-stone-100" />
+            <div className="h-24 animate-pulse rounded-lg bg-stone-100" />
+          </div>
+        </div>
+      )}
 
       {plan && (
         <section className="space-y-8">
@@ -254,7 +276,7 @@ export default function Home() {
       )}
 
       <footer className="mt-16 text-xs text-stone-500">
-        Taste data: Qloo Insights API (mock placeholders until the hackathon key is configured). Map © OpenStreetMap contributors.
+        Taste data from the Qloo Insights API. Map © OpenStreetMap contributors. Built for the Qloo Agentic Hackathon.
       </footer>
     </main>
   );

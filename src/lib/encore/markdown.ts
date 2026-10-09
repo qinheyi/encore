@@ -16,7 +16,7 @@ export function planToMarkdown(p: TourPlan): string {
     if (s.promoIdea) L.push(`**Promo idea:** ${s.promoIdea}`, "");
     L.push(`[OpenStreetMap](https://www.openstreetmap.org/?mlat=${s.lat}&mlon=${s.lon}#map=12/${s.lat}/${s.lon})`, "");
     L.push("- Venues", ...s.venues.map(recLine));
-    L.push("- Local co-bills", ...s.coBills.map(recLine));
+    L.push("- Co-bill / opener fits", ...s.coBills.map(recLine));
     L.push("- Podcasts", ...s.podcasts.map(recLine));
     L.push("- Brands", ...s.brands.map(recLine), "");
   }

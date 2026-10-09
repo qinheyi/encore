@@ -7,7 +7,7 @@ through the best markets, and builds a playbook for every stop — **venues** wh
 and the **podcasts and brands** those fans love for promotion. An LLM agent picks the final set of markets (respecting
 the artist's notes) and writes a grounded reason for every stop and every recommendation.
 
-> Status: works end-to-end on **mock data** (Qloo hackathon key pending). Live Qloo calls activate once `QLOO_API_KEY` is set.
+> Status: **live Qloo** end-to-end (venues filtered by live-music tag; MiniMax agent optional via `ENCORE_LLM=minimax`).
 
 ## How it works
 ```

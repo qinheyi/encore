@@ -1,10 +1,12 @@
 import { runAgent } from "./agent";
 import { defaultStartDate, geocodeCity, haversineKm, orderRoute, regionOf, schedule } from "./geo";
 import { cityWhy, promoTemplate, recWhy, summaryTemplate } from "./reasons";
-import { getDataSource } from "./sources";
+import { getDataSource, mapPool } from "./sources";
 import type { CityCandidate, Playbook, PlanRequest, Rec, Stop, TourPlan } from "./types";
 
 const RANKING_SIZE = 15;
+/** Cap parallel Qloo playbook fetches to avoid 429s. */
+const PLAYBOOK_CONCURRENCY = 2;
 
 export async function buildTourPlan(req: PlanRequest): Promise<TourPlan> {
   const ds = getDataSource();
@@ -13,29 +15,54 @@ export async function buildTourPlan(req: PlanRequest): Promise<TourPlan> {
   const size = Math.max(RANKING_SIZE, req.shows + 5);
   // Without a country filter, over-fetch so the home region still has enough markets.
   const global = await ds.rankCities(artist.id, req.countryCode, req.countryCode ? size : 50, similar);
-  if (!global.length) throw new Error("No ranked markets found for this artist / country.");
+  if (!global.length) {
+    throw new Error(
+      `No markets found for "${artist.name}"${req.countryCode ? ` in ${req.countryCode}` : ""}. Try another country or artist.`,
+    );
+  }
 
   const homeGeo = geocodeCity(req.homeCity);
   const home = homeGeo ? { city: homeGeo.city, lat: homeGeo.lat, lon: homeGeo.lon } : undefined;
+  if (req.homeCity && !homeGeo) {
+    // Soft warning only — we still plan, just without a geographic start.
+  }
 
   // A road tour stays in one region: the home city's, else the top-ranked market's.
   const region = regionOf(homeGeo?.countryCode ?? req.countryCode ?? global[0].countryCode);
   const ranking = global
     .filter((c) => regionOf(c.countryCode) === region)
     .slice(0, size)
-    .map((c, i) => ({ ...c, rank: i + 1 })); // rank within the touring region
+    .map((c, i) => ({ ...c, rank: i + 1 }));
   const routable = ranking;
-  if (!routable.length) throw new Error("No ranked markets in the home city's region.");
+  if (!routable.length) {
+    throw new Error(`No ranked markets in the home city's region (${region}). Try a different home city or country.`);
+  }
 
   const shows = Math.min(req.shows, routable.length);
-  const defaultRouteIds = routable.slice(0, shows).map((c) => c.id);
+  // Prefer including the home city when Qloo ranked it, so the tour starts where the artist lives.
+  let defaultRouteIds = routable.slice(0, shows).map((c) => c.id);
+  if (home) {
+    const homeStop = routable.find((c) => c.city.toLowerCase() === home.city.toLowerCase());
+    if (homeStop && !defaultRouteIds.includes(homeStop.id)) {
+      defaultRouteIds = [homeStop.id, ...defaultRouteIds.filter((id) => id !== homeStop.id)].slice(0, shows);
+    }
+  }
   const playbooks = new Map<string, Playbook>();
-  const loadPlaybook = (c: CityCandidate) => ds.cityPlaybook(artist.id, c);
-  await Promise.all(routable.slice(0, shows).map(async (c) => playbooks.set(c.id, await loadPlaybook(c))));
+  const loadPlaybook = async (c: CityCandidate) => {
+    try {
+      return await ds.cityPlaybook(artist.id, c);
+    } catch (e) {
+      // Partial failure: return empty playbook so the route still completes.
+      console.warn(`playbook failed for ${c.city}:`, (e as Error).message);
+      return { venues: [], coBills: [], podcasts: [], brands: [] };
+    }
+  };
+  await mapPool(routable.slice(0, shows), PLAYBOOK_CONCURRENCY, async (c) => {
+    playbooks.set(c.id, await loadPlaybook(c));
+  });
 
   const { output, info } = await runAgent({ artist, request: req, similar, ranking: routable, defaultRouteIds, playbooks, loadPlaybook, home });
 
-  // Validate the agent's market choice: known ids only, no dupes, exactly `shows` stops.
   let chosen = defaultRouteIds;
   if (output?.route_city_ids?.length) {
     const known = new Set(routable.map((c) => c.id));
@@ -44,12 +71,20 @@ export async function buildTourPlan(req: PlanRequest): Promise<TourPlan> {
     chosen = picked.slice(0, shows);
   }
   const chosenCities = routable.filter((c) => chosen.includes(c.id));
-  await Promise.all(chosenCities.filter((c) => !playbooks.has(c.id)).map(async (c) => playbooks.set(c.id, await loadPlaybook(c))));
+  const missing = chosenCities.filter((c) => !playbooks.has(c.id));
+  if (missing.length) {
+    await mapPool(missing, PLAYBOOK_CONCURRENCY, async (c) => {
+      playbooks.set(c.id, await loadPlaybook(c));
+    });
+  }
 
   const ordered = orderRoute(chosenCities, home);
   const legs = ordered.map((c, i) => {
     const prev = i === 0 ? home : ordered[i - 1];
-    return prev ? Math.round(haversineKm(prev, c)) : 0;
+    if (!prev) return 0;
+    const km = Math.round(haversineKm(prev, c));
+    // Same-city start (gazetteer vs Qloo coords) — treat as 0.
+    return i === 0 && km < 25 ? 0 : km;
   });
   const dates = schedule(legs, req.startDate ?? defaultStartDate());
 
@@ -63,7 +98,7 @@ export async function buildTourPlan(req: PlanRequest): Promise<TourPlan> {
     });
 
   const route: Stop[] = ordered.map((c, i) => {
-    const pb = playbooks.get(c.id)!;
+    const pb = playbooks.get(c.id) ?? { venues: [], coBills: [], podcasts: [], brands: [] };
     const agentCity = output?.cities?.[c.id];
     const why = agentCity?.why?.trim();
     if (why) cityHits++;

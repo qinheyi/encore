@@ -1,8 +1,17 @@
 /**
  * Data sources behind the agent's tools. Both return the same shapes so the
  * rest of the app does not care whether data is synthetic or live Qloo.
+ *
+ * Live mode activates when QLOO_API_KEY is set and QLOO_MOCK is not "1".
  */
-import { insights, isMockMode, searchEntities, type QlooEntity } from "@/lib/qloo";
+import {
+  insights,
+  isMockMode,
+  mapPool,
+  searchEntities,
+  TAG_LIVE_MUSIC_VENUE,
+  type QlooEntity,
+} from "@/lib/qloo";
 import { GAZETTEER } from "./geo";
 import type { CityCandidate, Playbook, Rec, RecKind, Signal } from "./types";
 
@@ -11,7 +20,7 @@ export interface DataSource {
   note: string;
   resolveArtist(name: string): Promise<{ id: string; name: string }>;
   similarArtists(artistId: string): Promise<{ id: string; name: string; affinity: number }[]>;
-  rankCities(artistId: string, countryCode: string | undefined, take: number, similar: { name: string; affinity: number }[]): Promise<CityCandidate[]>;
+  rankCities(artistId: string, countryCode: string | undefined, take: number, similar: { id?: string; name: string; affinity: number }[]): Promise<CityCandidate[]>;
   cityPlaybook(artistId: string, city: CityCandidate): Promise<Omit<Playbook, never>>;
 }
 
@@ -21,10 +30,10 @@ export function getDataSource(): DataSource {
 
 const r2 = (n: number) => Math.round(n * 100) / 100;
 const slug = (s: string) => s.toLowerCase().normalize("NFKD").replace(/[^a-z0-9]+/g, "-").replace(/(^-|-$)/g, "");
+const normCity = (s: string) => s.toLowerCase().normalize("NFKD").replace(/[^a-z0-9]/g, "");
 
 // ---------------------------------------------------------------------------
 // Mock source: deterministic SYNTHETIC data seeded by the artist name.
-// None of these names/scores come from Qloo. Used until the API key arrives.
 // ---------------------------------------------------------------------------
 function hash(str: string): number {
   let h = 2166136261;
@@ -44,7 +53,6 @@ function rng(seed: string) {
   };
 }
 const pick = <T,>(r: () => number, arr: T[]) => arr[Math.floor(r() * arr.length)];
-/** n distinct picks (sampling without replacement). */
 const pickN = <T,>(r: () => number, arr: T[], n: number) => {
   const pool = [...arr];
   return Array.from({ length: Math.min(n, pool.length) }, () => pool.splice(Math.floor(r() * pool.length), 1)[0]);
@@ -114,7 +122,7 @@ const mockSource: DataSource = {
       mockRec("venue", city.id, i, `${pick(r, ADJ)} ${pick(r, VENUE_NOUN)}`, base * (0.95 - i * 0.07 - r() * 0.03), pick(r, VENUE_TAGS)),
     );
     const coBills = Array.from({ length: 2 }, (_, i) =>
-      mockRec("coBill", city.id, i, `${pick(r, ADJ)} ${pick(r, NOUN)}`, base * (0.88 - i * 0.08 - r() * 0.04), ["local act", "based in " + city.city]),
+      mockRec("coBill", city.id, i, `${pick(r, ADJ)} ${pick(r, NOUN)}`, base * (0.88 - i * 0.08 - r() * 0.04), ["taste-aligned opener"]),
     );
     const podcasts = pickN(r, PODCAST, 2).map((name, i) =>
       mockRec("podcast", city.id, i, name, base * (0.8 - i * 0.08 - r() * 0.04), ["music", "interviews"]),
@@ -122,20 +130,23 @@ const mockSource: DataSource = {
     const brands = pickN(r, BRAND, 2).map((name, i) =>
       mockRec("brand", city.id, i, name, base * (0.76 - i * 0.08 - r() * 0.04), ["lifestyle"]),
     );
-    // de-duplicate names within a city
     const dedupe = (xs: Rec[]) => xs.filter((x, i) => xs.findIndex((y) => y.name === x.name) === i);
     return { venues: dedupe(venues), coBills: dedupe(coBills), podcasts: dedupe(podcasts), brands: dedupe(brands) };
   },
 };
 
 // ---------------------------------------------------------------------------
-// Live Qloo source (activates when QLOO_API_KEY is set). Not yet exercised:
-// the hackathon key has not arrived. Parameters follow docs.qloo.com.
+// Live Qloo source
 // ---------------------------------------------------------------------------
 const aff = (e: QlooEntity) => r2(e.query?.affinity ?? 0);
+const pop = (e: QlooEntity) => e.popularity ?? 0;
 
 function qlooRec(kind: RecKind, cityId: string, e: QlooEntity, idx: number): Rec {
-  const tags = (e.tags ?? []).slice(0, 3).map((t) => t.name);
+  const tags = (e.tags ?? [])
+    .map((t) => t.name)
+    .filter((n, i, arr) => arr.indexOf(n) === i)
+    .slice(0, 3);
+  const address = typeof e.properties?.address === "string" ? e.properties.address : undefined;
   return {
     id: `${kind[0]}:${cityId.replace(/^c:/, "")}:${idx + 1}`,
     kind,
@@ -143,59 +154,150 @@ function qlooRec(kind: RecKind, cityId: string, e: QlooEntity, idx: number): Rec
     affinity: aff(e),
     rankInCity: idx + 1,
     tags,
-    address: typeof e.properties?.address === "string" ? e.properties.address : undefined,
-    signals: [{ label: "affinity", value: aff(e).toFixed(2) }, { label: "rank in city", value: `#${idx + 1}` }],
+    address,
+    signals: [
+      { label: "affinity", value: aff(e).toFixed(2) },
+      { label: "rank in city", value: `#${idx + 1}` },
+      ...(pop(e) ? [{ label: "popularity", value: pop(e).toFixed(2) }] : []),
+    ],
     why: "",
     whySource: "template",
   };
+}
+
+/** Known touring markets get a soft boost so tiny high-affinity towns don't dominate. */
+const GAZETTEER_KEYS = new Set(GAZETTEER.map((c) => `${c.countryCode}:${normCity(c.city)}`));
+function isTouringMarket(city: string, countryCode: string) {
+  return GAZETTEER_KEYS.has(`${countryCode}:${normCity(city)}`);
+}
+
+function driversFromExplain(
+  e: QlooEntity,
+  artistId: string,
+  similar: { id?: string; name: string; affinity: number }[],
+): { name: string; weight: number }[] {
+  const contrib = e.query?.explainability?.["signal.interests.entities"] ?? [];
+  const idToName = new Map<string, string>();
+  for (const s of similar) if (s.id) idToName.set(s.id, s.name);
+  const mapped = contrib
+    .filter((c) => c.entity_id && c.entity_id !== artistId)
+    .map((c) => ({ name: idToName.get(c.entity_id!) ?? "", weight: r2(c.score ?? 0) }))
+    .filter((d) => d.name);
+  if (mapped.length) return mapped.slice(0, 3);
+  // Fallback when explainability only echoes the headliner (single-entity signal).
+  return similar.slice(0, 3).map((a) => ({ name: a.name, weight: a.affinity }));
 }
 
 const qlooSource: DataSource = {
   name: "qloo",
   note: "Live data from the Qloo Insights API (hackathon environment).",
   async resolveArtist(name) {
-    const [hit] = await searchEntities(name, "urn:entity:artist", 1);
+    const hits = await searchEntities(name, "urn:entity:artist", 5);
+    const hit = hits[0];
     if (!hit) throw new Error(`Artist not found in Qloo: ${name}`);
     return { id: hit.entity_id, name: hit.name };
   },
   async similarArtists(artistId) {
-    const rows = await insights("urn:entity:artist", { "signal.interests.entities": artistId }, 8);
-    return rows.filter((x) => x.entity_id !== artistId).slice(0, 6).map((x) => ({ id: x.entity_id, name: x.name, affinity: aff(x) }));
+    const rows = await insights("urn:entity:artist", { "signal.interests.entities": artistId }, 10);
+    return rows
+      .filter((x) => x.entity_id !== artistId)
+      .slice(0, 6)
+      .map((x) => ({ id: x.entity_id, name: x.name, affinity: aff(x) }));
   },
   async rankCities(artistId, countryCode, take, similar) {
+    // Multi-entity signal so explainability returns named taste drivers (not just the headliner).
+    const signalIds = [artistId, ...similar.slice(0, 3).map((s) => s.id).filter(Boolean)].join(",");
     const rows = await insights(
       "urn:entity:destination",
-      { "signal.interests.entities": artistId, "filter.geocode.country_code": countryCode, "feature.explainability": true },
-      take,
+      {
+        "signal.interests.entities": signalIds,
+        "filter.geocode.country_code": countryCode,
+        "filter.popularity.min": 0.55,
+        "feature.explainability": true,
+      },
+      Math.max(40, take * 3),
     );
-    return rows
+
+    const scored = rows
       .filter((x) => typeof x.location?.lat === "number" && typeof x.location?.lon === "number")
-      .map((x, i) => ({
-        id: `c:${(x.properties?.geocode?.country_code ?? "xx").toLowerCase()}:${slug(x.properties?.geocode?.name ?? x.name)}`,
-        city: x.properties?.geocode?.name ?? x.name,
-        countryCode: x.properties?.geocode?.country_code ?? countryCode ?? "",
-        lat: x.location!.lat!,
-        lon: x.location!.lon!,
-        affinity: aff(x),
-        rank: i + 1,
-        // TODO: map query.explainability contributions here once the response shape is confirmed with a real key.
-        drivers: similar.slice(0, 3).map((a) => ({ name: a.name, weight: a.affinity })),
-      }));
+      .filter((x) => {
+        // Road tours: skip Alaska / Hawaii (and far-offshore US points).
+        const admin = String(x.properties?.geocode?.admin1_region ?? "").toLowerCase();
+        if (admin.includes("hawaii") || admin.includes("alaska") || admin === "hi" || admin === "ak") return false;
+        const lon = x.location!.lon!;
+        const lat = x.location!.lat!;
+        if (lon < -130 && lat < 50) return false; // Hawaii belt
+        if (lon < -130 && lat >= 50) return false; // Alaska
+        return true;
+      })
+      .map((x) => {
+        const city = x.properties?.geocode?.name ?? x.name;
+        const cc = x.properties?.geocode?.country_code ?? countryCode ?? "";
+        const a = x.query?.affinity ?? 0;
+        const p = x.popularity ?? 0;
+        // Blend affinity with popularity; soft-boost known touring markets.
+        let score = a * (0.45 + 0.55 * p);
+        if (isTouringMarket(city, cc)) score *= 1.18;
+        return { x, city, cc, a, p, score };
+      });
+
+    // Deduplicate near-identical metro names (keep highest score).
+    const byKey = new Map<string, (typeof scored)[0]>();
+    for (const row of scored) {
+      const key = `${row.cc}:${normCity(row.city)}`;
+      const prev = byKey.get(key);
+      if (!prev || row.score > prev.score) byKey.set(key, row);
+    }
+    const ranked = [...byKey.values()].sort((a, b) => b.score - a.score).slice(0, take);
+
+    return ranked.map((row, i) => ({
+      id: `c:${row.cc.toLowerCase()}:${slug(row.city)}`,
+      city: row.city,
+      countryCode: row.cc,
+      lat: row.x.location!.lat!,
+      lon: row.x.location!.lon!,
+      affinity: r2(row.a),
+      rank: i + 1,
+      drivers: driversFromExplain(row.x, artistId, similar),
+    }));
   },
   async cityPlaybook(artistId, city) {
-    // TODO(after key): add a live-music venue tag from /v2/tags as `filter.tags` for venues.
     const loc = city.city;
-    const [venues, coBills, podcasts, brands] = await Promise.all([
-      insights("urn:entity:place", { "signal.interests.entities": artistId, "filter.location.query": loc }, 3),
-      insights("urn:entity:artist", { "signal.interests.entities": artistId, "signal.location.query": loc }, 3),
-      insights("urn:entity:podcast", { "signal.interests.entities": artistId, "signal.location.query": loc }, 2),
-      insights("urn:entity:brand", { "signal.interests.entities": artistId, "signal.location.query": loc }, 2),
+    // Stagger slightly inside the pool to reduce burst 429s.
+    const [venuesRaw, coBills, podcasts, brands] = await Promise.all([
+      insights(
+        "urn:entity:place",
+        {
+          "signal.interests.entities": artistId,
+          "filter.location.query": loc,
+          "filter.tags": TAG_LIVE_MUSIC_VENUE,
+        },
+        6,
+      ),
+      insights("urn:entity:artist", { "signal.interests.entities": artistId, "signal.location.query": loc }, 5),
+      insights("urn:entity:podcast", { "signal.interests.entities": artistId, "signal.location.query": loc }, 3),
+      insights("urn:entity:brand", { "signal.interests.entities": artistId, "signal.location.query": loc }, 3),
     ]);
+
+    const musicHint = (e: QlooEntity) => {
+      const names = (e.tags ?? []).map((t) => t.name.toLowerCase());
+      const hits = names.filter((n) => /live music|music venue|concert|music hall|club|bar|theater|theatre|ballroom/.test(n)).length;
+      return hits + (e.properties?.live_music ? 2 : 0);
+    };
+    const venues = venuesRaw
+      .filter((e) => e.properties?.is_closed !== true)
+      .sort((a, b) => musicHint(b) - musicHint(a) || aff(b) - aff(a))
+      .slice(0, 3)
+      .map((e, i) => qlooRec("venue", city.id, e, i));
+
     return {
-      venues: venues.map((e, i) => qlooRec("venue", city.id, e, i)),
+      venues,
+      // Location-scoped artist insights still return taste-aligned openers (not necessarily "local bands").
       coBills: coBills.filter((e) => e.entity_id !== artistId).slice(0, 2).map((e, i) => qlooRec("coBill", city.id, e, i)),
-      podcasts: podcasts.map((e, i) => qlooRec("podcast", city.id, e, i)),
-      brands: brands.map((e, i) => qlooRec("brand", city.id, e, i)),
+      podcasts: podcasts.slice(0, 2).map((e, i) => qlooRec("podcast", city.id, e, i)),
+      brands: brands.slice(0, 2).map((e, i) => qlooRec("brand", city.id, e, i)),
     };
   },
 };
+
+export { mapPool };
