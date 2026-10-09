@@ -199,7 +199,7 @@ export default function Home() {
             ) : (
               <Badge tone="stone">Agent: rule-based fallback{plan.agent.fallbackReason ? ` (${plan.agent.fallbackReason})` : ""}</Badge>
             )}
-            {plan.agent.coverage && <Badge tone="rose">Agent reasons: {plan.agent.coverage.cities} cities, {plan.agent.coverage.items} items</Badge>}
+            {plan.agent.coverage && <Badge tone="rose">Agent reasons: {plan.agent.coverage.cities} cities, {plan.agent.coverage.items} items{plan.agent.droppedItemReasons ? ` · ${plan.agent.droppedItemReasons} ungrounded dropped` : ""}</Badge>}
             <button onClick={() => download(plan)} className="ml-auto rounded-lg border border-stone-300 bg-white px-3 py-1.5 text-sm hover:bg-stone-50">
               Download plan (.md)
             </button>

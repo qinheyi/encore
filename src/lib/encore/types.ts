@@ -66,6 +66,8 @@ export interface AgentInfo {
   steps: number;
   toolCalls: string[];
   coverage?: { cities: string; items: string };
+  /** Item reasons the model wrote for items it was never shown (discarded as ungrounded). */
+  droppedItemReasons?: number;
   usage?: { prompt_tokens?: number; completion_tokens?: number; total_tokens?: number };
   fallbackReason?: string;
   latencyMs?: number;

@@ -17,7 +17,7 @@ artist ─▶ Qloo /search ─▶ artist entity
         └▶ per market: place / artist / podcast / brand insights (location-scoped)
                     │
                     ▼
-     Agent (StepFun step-3.5-flash, OpenAI-compatible)
+     Agent (MiniMax-M3 or StepFun step-3.5-flash, OpenAI-compatible)
        - chooses N markets from the ranking (honours notes like "avoid big cities")
        - optional tools: get_city_playbook, estimate_route_km
        - writes a reason per city + per item, citing affinity/rank/drivers
@@ -34,13 +34,23 @@ signal-citing reasons — the plan is always complete.
 npm install
 npm run dev            # http://localhost:3000 — mock data, rule-based reasons, no API calls
 ```
-Enable the agent (costs StepFun credits, ~1 call per plan):
+Enable the agent (costs credits, ~1 call per plan). Keys come from the environment — never commit them:
 ```bash
-export STEPFUN_API_KEY=...        # never commit it
-ENCORE_LLM=stepfun npm run dev
+export MINIMAX_API_KEY=...
+ENCORE_LLM=minimax npm run dev          # MiniMax-M3 via https://api.minimax.cn/v1
+# or
+export STEPFUN_API_KEY=...
+ENCORE_LLM=stepfun npm run dev          # step-3.5-flash via https://api.stepfun.com/v1
 ```
-Optional: `ENCORE_AGENT_MAX_STEPS=3` lets the agent call tools before answering; `STEPFUN_MODEL`, `STEPFUN_BASE_URL`
-(default `https://api.stepfun.com/v1`). See `.env.example`.
+Options (see `.env.example`): `ENCORE_AGENT_MAX_STEPS=3` lets the agent call tools before answering;
+`MINIMAX_MODEL` / `MINIMAX_BASE_URL` / `MINIMAX_THINKING=adaptive`; `STEPFUN_MODEL` / `STEPFUN_BASE_URL`; `LLM_TIMEOUT_MS`.
+
+Provider notes:
+- **MiniMax**: no `response_format` JSON mode, so JSON is enforced by the prompt and a tolerant parser
+  (strips `<think>…</think>`, code fences and prose, picks the first valid object). Requests set
+  `reasoning_split: true`; in tool loops the assistant message is echoed back unmodified (incl. `reasoning_details`),
+  as MiniMax requires. Errors reported via `base_resp.status_code` (e.g. 1008 insufficient balance) trigger the fallback.
+- **StepFun**: uses `response_format: {"type":"json_object"}`.
 
 API: `POST /api/plan` with `{"artist":"…","homeCity":"Chicago","countryCode":"US","shows":8,"startDate":"2026-11-06","notes":"…"}`.
 
