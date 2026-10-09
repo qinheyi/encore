@@ -61,7 +61,8 @@ export async function buildTourPlan(req: PlanRequest): Promise<TourPlan> {
       return { venues: [], coBills: [], podcasts: [], brands: [] };
     }
   };
-  await mapPool(routable.slice(0, shows), PLAYBOOK_CONCURRENCY, async (c) => {
+  const defaultCities = defaultRouteIds.map((id) => routable.find((c) => c.id === id)!).filter(Boolean);
+  await mapPool(defaultCities, PLAYBOOK_CONCURRENCY, async (c) => {
     playbooks.set(c.id, await loadPlaybook(c));
   });
 

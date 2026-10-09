@@ -45,6 +45,8 @@ export interface AgentResult {
   info: AgentInfo;
 }
 
+const EMPTY_PLAYBOOK: Playbook = { venues: [], coBills: [], podcasts: [], brands: [] };
+
 const compactPlaybook = (pb: Playbook) =>
   [...pb.venues, ...pb.coBills, ...pb.podcasts, ...pb.brands].map((r) => ({
     id: r.id, kind: r.kind, name: r.name, affinity: r.affinity, rank_in_city: r.rankInCity, tags: r.tags,
@@ -129,14 +131,14 @@ export async function runAgent(ctx: AgentContext): Promise<AgentResult> {
       taste_drivers: c.drivers.map((d) => d.name),
     })),
     default_route_city_ids: ctx.defaultRouteIds,
-    playbooks: Object.fromEntries(ctx.defaultRouteIds.map((id) => [id, compactPlaybook(ctx.playbooks.get(id)!)])),
+    playbooks: Object.fromEntries(ctx.defaultRouteIds.map((id) => [id, compactPlaybook(ctx.playbooks.get(id) ?? EMPTY_PLAYBOOK)])),
     note: cfg.maxSteps > 1
       ? "Before choosing any market that is not in playbooks, you MUST call get_city_playbook for it, and you may call estimate_route_km to compare options. Only write item reasons for item ids you have actually seen."
       : "If you swap in a market that has no playbook, still write its city reason but do NOT write item reasons for it (code will). Only use item ids listed in playbooks.",
   };
 
   // Item ids the model has actually been shown; reasons for any other id are ungrounded.
-  const seen = new Set<string>(ctx.defaultRouteIds.flatMap((id) => compactPlaybook(ctx.playbooks.get(id)!).map((it) => it.id)));
+  const seen = new Set<string>(ctx.defaultRouteIds.flatMap((id) => compactPlaybook(ctx.playbooks.get(id) ?? EMPTY_PLAYBOOK).map((it) => it.id)));
 
   const messages: ChatMessage[] = [
     { role: "system", content: SYSTEM_PROMPT },
