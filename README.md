@@ -1,6 +1,6 @@
 # Encore — an AI tour-planning agent for independent musicians
 
-**Live demo:** _DEMO_URL_PLACEHOLDER_ · Built for the [Qloo Agentic Hackathon](https://qloo.devpost.com/) · MIT licensed
+**Live demo:** https://encore-rouge-chi.vercel.app · Built for the [Qloo Agentic Hackathon](https://qloo.devpost.com/) · MIT licensed
 
 Type an artist's name. Encore asks the **Qloo Taste AI** graph *where that artist's audience over-indexes*, picks the
 best markets, routes a road tour through them, and builds a playbook for every stop:
