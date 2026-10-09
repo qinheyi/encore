@@ -10,8 +10,21 @@ function FitBounds({ boundsKey }: { boundsKey: string }) {
   const map = useMap();
   useEffect(() => {
     const pts = JSON.parse(boundsKey) as LatLngTuple[];
-    if (pts.length === 1) map.setView(pts[0], 6);
-    else if (pts.length) map.fitBounds(pts as LatLngBoundsExpression, { padding: [40, 40], maxZoom: 7 });
+    const fit = () => {
+      // The container can change size after mount (fonts, layout, results streaming in): re-measure first.
+      map.invalidateSize();
+      if (pts.length === 1) map.setView(pts[0], 6, { animate: false });
+      else if (pts.length) map.fitBounds(pts as LatLngBoundsExpression, { padding: [40, 40], maxZoom: 7, animate: false });
+    };
+    fit();
+    const t = setTimeout(fit, 300);
+    let last = "";
+    const ro = new ResizeObserver(([e]) => {
+      const size = `${Math.round(e.contentRect.width)}x${Math.round(e.contentRect.height)}`;
+      if (size !== last) { last = size; fit(); }
+    });
+    ro.observe(map.getContainer());
+    return () => { clearTimeout(t); ro.disconnect(); };
   }, [map, boundsKey]);
   return null;
 }
@@ -42,12 +55,15 @@ export default function RouteMap({ plan }: { plan: TourPlan }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [JSON.stringify(pts)]);
   const others = plan.ranking.filter((c) => !c.inRoute);
+  // Stops that sit close to an earlier stop get their label on the right so labels don't stack.
+  const crowded = plan.route.map((s, i) => plan.route.slice(0, i).some((p) => Math.abs(p.lat - s.lat) < 1.6 && Math.abs(p.lon - s.lon) < 2.5));
 
   return (
     <MapContainer
       center={pts[0] ?? [40, -40]}
       zoom={4}
       scrollWheelZoom={false}
+      zoomSnap={0.25}
       className="h-[360px] w-full rounded-2xl border border-white/10 md:h-[560px]"
       aria-label={`Tour map: ${plan.route.map((s) => s.city).join(", ")}`}
     >
@@ -82,9 +98,9 @@ export default function RouteMap({ plan }: { plan: TourPlan }) {
           <Tooltip className="encore-tip" direction="left" offset={[-14, 0]} permanent>{`Home · ${plan.home!.city}`}</Tooltip>
         </Marker>
       )}
-      {plan.route.map((s) => (
+      {plan.route.map((s, i) => (
         <Marker key={s.id} position={[s.lat, s.lon]} icon={pin(s.order, s.city)} zIndexOffset={1000 - s.order}>
-          <Tooltip className="encore-tip" direction="top" offset={[0, -16]} permanent>{s.city}</Tooltip>
+          <Tooltip className="encore-tip" direction={crowded[i] ? "right" : "top"} offset={crowded[i] ? [16, 0] : [0, -16]} permanent>{s.city}</Tooltip>
           <Popup>
             <strong>{s.order}. {s.city}</strong> — {s.date}
             <br />Affinity {s.affinity.toFixed(2)} · leg {s.legKm} km
