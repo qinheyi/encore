@@ -1,5 +1,5 @@
 import { runAgent } from "./agent";
-import { defaultStartDate, geocodeCity, haversineKm, orderRoute, regionOf, schedule } from "./geo";
+import { defaultStartDate, geocodeCity, haversineKm, orderRoute, regionOf, schedule, selectStops } from "./geo";
 import { cityWhy, promoTemplate, recWhy, summaryTemplate } from "./reasons";
 import { getDataSource, mapPool } from "./sources";
 import type { CityCandidate, Playbook, PlanRequest, Rec, Stop, TourPlan } from "./types";
@@ -43,14 +43,10 @@ export async function buildTourPlan(req: PlanRequest): Promise<TourPlan> {
   }
 
   const shows = Math.min(req.shows, routable.length);
-  // Prefer including the home city when Qloo ranked it, so the tour starts where the artist lives.
-  let defaultRouteIds = routable.slice(0, shows).map((c) => c.id);
-  if (home) {
-    const homeStop = routable.find((c) => c.city.toLowerCase() === home.city.toLowerCase());
-    if (homeStop && !defaultRouteIds.includes(homeStop.id)) {
-      defaultRouteIds = [homeStop.id, ...defaultRouteIds.filter((id) => id !== homeStop.id)].slice(0, shows);
-    }
-  }
+  // Prefer including the home city when Qloo ranked it, so the tour starts where the artist lives;
+  // then trade a little audience rank for a tighter, non-zig-zag drive.
+  const homeStop = home ? routable.find((c) => c.city.toLowerCase() === home.city.toLowerCase()) : undefined;
+  const defaultRouteIds = selectStops(routable, shows, home, homeStop ? [homeStop.id] : []).map((c) => c.id);
   const playbooks = new Map<string, Playbook>();
   const loadPlaybook = async (c: CityCandidate) => {
     try {
@@ -124,6 +120,8 @@ export async function buildTourPlan(req: PlanRequest): Promise<TourPlan> {
   });
 
   const km = legs.reduce((a, b) => a + b, 0);
+  const last = ordered[ordered.length - 1];
+  const returnKm = home && last ? Math.round(haversineKm(last, home)) : undefined;
   const days = route.length + route.filter((s) => s.travelDayBefore).length;
   if (info.mode === "llm") info.coverage = { cities: `${cityHits}/${route.length}`, items: `${itemHits}/${itemTotal}` };
   const agentSummary = output?.summary?.trim();
@@ -135,7 +133,7 @@ export async function buildTourPlan(req: PlanRequest): Promise<TourPlan> {
     ranking: ranking.map((c) => ({ ...c, inRoute: chosen.includes(c.id) })),
     home,
     route,
-    totals: { km, days, shows: route.length },
+    totals: { km, days, shows: route.length, ...(returnKm !== undefined ? { returnKm } : {}) },
     summary: agentSummary || summaryTemplate(artist.name, route.map((s) => s.city), km),
     summarySource: agentSummary ? "agent" : "template",
     data: { source: ds.name, note: ds.note },

@@ -74,13 +74,13 @@ export interface AgentInfo {
 }
 
 export interface TourPlan {
-  artist: { id: string; name: string };
+  artist: { id: string; name: string; image?: string };
   request: PlanRequest;
   similarArtists: { name: string; affinity: number }[];
   ranking: (CityCandidate & { inRoute: boolean })[];
   home?: { city: string; lat: number; lon: number };
   route: Stop[];
-  totals: { km: number; days: number; shows: number };
+  totals: { km: number; days: number; shows: number; /** drive from the last show back home */ returnKm?: number };
   summary: string;
   summarySource: "agent" | "template";
   data: { source: "mock" | "qloo"; note: string };

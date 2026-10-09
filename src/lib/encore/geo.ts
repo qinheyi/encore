@@ -100,23 +100,27 @@ export function haversineKm(a: { lat: number; lon: number }, b: { lat: number; l
 
 type Pt = { lat: number; lon: number };
 
-function pathLength(start: Pt | undefined, pts: Pt[]): number {
+/** Length of a path from `start` through `pts`; with `loop`, also the drive back to `start`. */
+export function pathLength(start: Pt | undefined, pts: Pt[], loop = false): number {
   let km = 0;
   let prev = start;
   for (const p of pts) {
     if (prev) km += haversineKm(prev, p);
     prev = p;
   }
+  if (loop && start && prev) km += haversineKm(prev, start);
   return km;
 }
 
 /**
- * Deterministic route ordering: nearest-neighbour from the home city (or the
- * highest-affinity stop when no home is known), then 2-opt improvement.
- * Geography is done in code, never by the LLM.
+ * Deterministic route ordering (geography is done in code, never by the LLM):
+ * nearest-neighbour from home, then 2-opt + or-opt (move one stop) until no gain.
+ * With a home city the objective is the full loop (home → stops → home), so the
+ * tour sweeps around instead of zig-zagging east/west. Without home, the
+ * highest-affinity stop opens and the path is open-ended.
  */
 export function orderRoute<T extends Pt & { affinity: number }>(stops: T[], home?: Pt): T[] {
-  if (stops.length <= 2) return [...stops];
+  if (stops.length <= 1) return [...stops];
   const remaining = [...stops];
   const ordered: T[] = [];
   let cur: Pt;
@@ -139,23 +143,83 @@ export function orderRoute<T extends Pt & { affinity: number }>(stops: T[], home
     ordered.push(next);
     cur = next;
   }
-  // 2-opt
-  let improved = true;
-  let route = ordered;
+  const loop = Boolean(home);
+  const cost = (r: T[]) => pathLength(home, r, loop);
   const fixedFirst = home ? 0 : 1; // without home, keep the top-affinity opener first
-  for (let iter = 0; improved && iter < 50; iter++) {
+  let route = ordered;
+  let bestCost = cost(route);
+  let improved = true;
+  for (let iter = 0; improved && iter < 100; iter++) {
     improved = false;
+    // 2-opt: reverse a segment
     for (let i = fixedFirst; i < route.length - 1; i++) {
       for (let k = i + 1; k < route.length; k++) {
-        const candidate = [...route.slice(0, i), ...route.slice(i, k + 1).reverse(), ...route.slice(k + 1)];
-        if (pathLength(home, candidate) + 1e-6 < pathLength(home, route)) {
-          route = candidate;
-          improved = true;
-        }
+        const cand = [...route.slice(0, i), ...route.slice(i, k + 1).reverse(), ...route.slice(k + 1)];
+        const c = cost(cand);
+        if (c + 1e-6 < bestCost) { route = cand; bestCost = c; improved = true; }
+      }
+    }
+    // or-opt: relocate a single stop
+    for (let i = fixedFirst; i < route.length; i++) {
+      for (let j = fixedFirst; j < route.length; j++) {
+        if (i === j) continue;
+        const cand = [...route];
+        const [m] = cand.splice(i, 1);
+        cand.splice(j, 0, m);
+        const c = cost(cand);
+        if (c + 1e-6 < bestCost) { route = cand; bestCost = c; improved = true; }
       }
     }
   }
+  // A loop can be driven either way; start with the nearer end so the first leg is short.
+  if (home && route.length > 1 && haversineKm(home, route[route.length - 1]) + 1e-6 < haversineKm(home, route[0])) {
+    route = [...route].reverse();
+  }
   return route;
+}
+
+/** km of driving a penalty-equivalent of one full "rank value" (see selectStops). */
+const KM_PER_VALUE = Number(process.env.ENCORE_KM_PER_VALUE) || 3000;
+
+/**
+ * Pick `n` markets that balance audience rank against drive distance.
+ * Value of a market = 1 − 0.5·(rank−1)/(pool−1) (so #1 = 1.0, last in pool = 0.5);
+ * objective = Σ value − routeKm / KM_PER_VALUE. Starts from the top-n by rank and
+ * does best-improvement swaps against the next-best markets in the pool, so a
+ * far-flung #3 market gets replaced by a #9 market that sits on the way.
+ * `keep` ids (e.g. the home city) are never swapped out.
+ */
+export function selectStops<T extends Pt & { id: string; rank: number; affinity: number }>(
+  ranked: T[],
+  n: number,
+  home?: Pt,
+  keep: string[] = [],
+): T[] {
+  const sorted = [...ranked].sort((a, b) => a.rank - b.rank);
+  if (sorted.length <= n) return sorted;
+  const pool = sorted.slice(0, Math.min(sorted.length, Math.max(n * 2, n + 6)));
+  const value = new Map(pool.map((c, i) => [c.id, 1 - (0.5 * i) / Math.max(1, pool.length - 1)]));
+  const km = (set: T[]) => pathLength(home, orderRoute(set, home), Boolean(home));
+  const score = (set: T[]) => set.reduce((a, c) => a + (value.get(c.id) ?? 0), 0) - km(set) / KM_PER_VALUE;
+  const keepSet = new Set(keep);
+  let chosen = [...pool.filter((c) => keepSet.has(c.id)), ...pool.filter((c) => !keepSet.has(c.id))].slice(0, n);
+  let best = score(chosen);
+  for (let iter = 0; iter < 30; iter++) {
+    let bestCand: T[] | null = null;
+    for (let i = 0; i < chosen.length; i++) {
+      if (keepSet.has(chosen[i].id)) continue;
+      for (const c of pool) {
+        if (chosen.some((x) => x.id === c.id)) continue;
+        const cand = [...chosen];
+        cand[i] = c;
+        const s = score(cand);
+        if (s > best + 1e-6) { best = s; bestCand = cand; }
+      }
+    }
+    if (!bestCand) break;
+    chosen = bestCand;
+  }
+  return chosen.sort((a, b) => a.rank - b.rank);
 }
 
 /** Add dates: one show per day, plus a travel/off day before any leg longer than `longLegKm`. */

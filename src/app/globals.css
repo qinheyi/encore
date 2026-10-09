@@ -1,21 +1,86 @@
 @import "tailwindcss";
 
 :root {
-  --background: #fafaf9;
-  --foreground: #1c1917;
+  --background: #07060b;
+  --foreground: #f4f4f5;
+  --pink: #ff4d9d;
+  --orange: #ff9f43;
+  --cyan: #3ee6f0;
 }
 
 @theme inline {
   --color-background: var(--background);
   --color-foreground: var(--foreground);
+  --color-neon-pink: var(--pink);
+  --color-neon-orange: var(--orange);
+  --color-neon-cyan: var(--cyan);
+  --font-display: var(--font-anton), "Impact", "Arial Narrow Bold", sans-serif;
+  --font-sans: var(--font-inter), ui-sans-serif, system-ui, sans-serif;
+  --font-mono: var(--font-jbmono), ui-monospace, "SFMono-Regular", monospace;
 }
+
+html { color-scheme: dark; }
 
 body {
   background: var(--background);
   color: var(--foreground);
-  font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+  font-family: var(--font-sans);
 }
 
-.leaflet-container {
-  font-family: inherit;
+/* Stage-light glow behind the hero */
+.stage-bg {
+  background:
+    radial-gradient(60% 50% at 15% 0%, rgba(255, 77, 157, 0.28), transparent 70%),
+    radial-gradient(50% 45% at 90% 10%, rgba(62, 230, 240, 0.18), transparent 70%),
+    radial-gradient(40% 40% at 50% 100%, rgba(255, 159, 67, 0.14), transparent 70%);
 }
+
+.grain::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  opacity: 0.07;
+  background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='160' height='160'><filter id='n'><feTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='2' stitchTiles='stitch'/></filter><rect width='100%' height='100%' filter='url(%23n)'/></svg>");
+}
+
+.text-neon {
+  background: linear-gradient(92deg, var(--pink) 0%, var(--orange) 55%, #ffd76a 100%);
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+}
+
+.neon-glow { text-shadow: 0 0 24px rgba(255, 77, 157, 0.45); }
+
+.ring-neon { box-shadow: 0 0 0 1px rgba(255, 77, 157, 0.35), 0 10px 40px -12px rgba(255, 77, 157, 0.35); }
+
+/* Equalizer loader */
+@keyframes eq { 0%, 100% { transform: scaleY(0.25); } 50% { transform: scaleY(1); } }
+.eq span { display: inline-block; width: 6px; height: 28px; margin: 0 2px; border-radius: 2px; transform-origin: bottom;
+  background: linear-gradient(180deg, var(--orange), var(--pink)); animation: eq 0.9s ease-in-out infinite; }
+.eq span:nth-child(2) { animation-delay: 0.15s; } .eq span:nth-child(3) { animation-delay: 0.3s; }
+.eq span:nth-child(4) { animation-delay: 0.45s; } .eq span:nth-child(5) { animation-delay: 0.6s; }
+
+@media (prefers-reduced-motion: reduce) {
+  .eq span, .animate-pulse, .animate-spin { animation: none !important; }
+}
+
+/* Leaflet, dark theme. OSM raster tiles inverted into a dark basemap (no API key needed). */
+.encore-dark-tiles { filter: invert(1) hue-rotate(185deg) brightness(0.82) contrast(0.92) saturate(0.35); }
+.leaflet-container { font-family: inherit; background: #0b0b10; }
+.leaflet-tooltip.encore-tip {
+  background: rgba(10, 10, 15, 0.92); color: #f4f4f5; border: 1px solid rgba(255, 77, 157, 0.5);
+  border-radius: 6px; font-weight: 600; font-size: 12px; box-shadow: none; padding: 2px 6px;
+}
+.leaflet-tooltip.encore-tip::before { display: none; }
+.leaflet-popup-content-wrapper, .leaflet-popup-tip { background: #121218; color: #f4f4f5; }
+.leaflet-control-attribution { background: rgba(7, 6, 11, 0.8) !important; color: #a1a1aa !important; }
+.leaflet-control-attribution a { color: #f9a8d4 !important; }
+.leaflet-bar a { background: #16161d; color: #f4f4f5; border-color: #2a2a33; }
+.stop-pin { display: flex; align-items: center; justify-content: center; width: 30px; height: 30px; border-radius: 9999px;
+  background: linear-gradient(135deg, var(--pink), var(--orange)); color: #0a0a0f; font: 700 13px/1 var(--font-sans);
+  border: 2px solid #0a0a0f; box-shadow: 0 0 0 2px rgba(255, 77, 157, 0.6), 0 0 18px rgba(255, 77, 157, 0.7); }
+.home-pin { display: flex; align-items: center; justify-content: center; width: 26px; height: 26px; border-radius: 6px;
+  background: #0a0a0f; color: var(--cyan); border: 2px solid var(--cyan); font-size: 14px; box-shadow: 0 0 14px rgba(62, 230, 240, 0.6); }
+.route-arrow { color: #ffd76a; font-size: 20px; line-height: 20px; text-align: center; text-shadow: 0 0 6px rgba(0,0,0,0.9); }

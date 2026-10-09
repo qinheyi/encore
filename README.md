@@ -31,7 +31,9 @@ artist ─▶ Qloo /search                                  → artist entity
        - output is validated: unknown or never-shown ids are dropped, gaps filled by rule-based reasons
                     │
                     ▼
-     Code: nearest-neighbour + 2-opt routing from the home city, one show per day,
+     Code: market set chosen by rank vs. drive distance (swap search), then
+           nearest-neighbour + 2-opt + or-opt on the home → stops → home loop
+           (re-run after the agent swaps cities), one show per day,
            travel day before legs > 700 km → map + schedule + Markdown export
 ```
 **Always returns a complete plan.** If the LLM is disabled, out of quota, slow (the agent stops at a ~54 s budget so the
@@ -80,7 +82,7 @@ with reasons, and metadata on the data source and agent (model, latency, reason 
 - Qloo responses are cached privately server-side only (Next.js fetch cache) and are **not** stored in this repository.
 
 ## Tech
-Next.js 15 (App Router) · TypeScript · Tailwind · zod · Leaflet / react-leaflet with OpenStreetMap tiles · deployed on Vercel.
+Next.js 15 (App Router) · TypeScript · Tailwind · zod · Leaflet / react-leaflet with OpenStreetMap tiles (darkened in-browser via CSS filter) · deployed on Vercel.
 
 ## License
 [MIT](./LICENSE)

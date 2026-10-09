@@ -18,7 +18,7 @@ import type { CityCandidate, Playbook, Rec, RecKind, Signal } from "./types";
 export interface DataSource {
   name: "mock" | "qloo";
   note: string;
-  resolveArtist(name: string): Promise<{ id: string; name: string }>;
+  resolveArtist(name: string): Promise<{ id: string; name: string; image?: string }>;
   similarArtists(artistId: string): Promise<{ id: string; name: string; affinity: number }[]>;
   rankCities(artistId: string, countryCode: string | undefined, take: number, similar: { id?: string; name: string; affinity: number }[]): Promise<CityCandidate[]>;
   cityPlaybook(artistId: string, city: CityCandidate): Promise<Omit<Playbook, never>>;
@@ -195,7 +195,10 @@ const qlooSource: DataSource = {
     const hits = await searchEntities(name, "urn:entity:artist", 5);
     const hit = hits[0];
     if (!hit) throw new Error(`Artist not found in Qloo: ${name}`);
-    return { id: hit.entity_id, name: hit.name };
+    // Image URL is passed through to the browser for this response only (never persisted).
+    const img = (hit.properties?.image as { url?: unknown } | undefined)?.url;
+    const image = typeof img === "string" && /^https:\/\//.test(img) ? img : undefined;
+    return { id: hit.entity_id, name: hit.name, ...(image ? { image } : {}) };
   },
   async similarArtists(artistId) {
     const rows = await insights("urn:entity:artist", { "signal.interests.entities": artistId }, 10);
